@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TESTING</title>
+<style>
+:root{--bg:#c0c0c0;--fg:#000;--bd:#000;--hi:#e8e8e8;--err:#a00000;--ok:#006400;--dim:#444;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#000;--fg:#c8c8c8;--bd:#808080;--hi:#1c1c1c;--err:#ff6060;--ok:#50e060;--dim:#888}}
+:root[data-theme="dark"]{--bg:#000;--fg:#c8c8c8;--bd:#808080;--hi:#1c1c1c;--err:#ff6060;--ok:#50e060;--dim:#888}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;padding:12px;background:var(--bg);color:var(--fg);font:14px/1.4 "Courier New",Courier,monospace}
+h1{font-size:18px;margin:0 0 4px}
+h2{font-size:15px;margin:16px 0 6px}
+pre{margin:4px 0;white-space:pre-wrap;word-break:break-word}
+.ok{color:var(--ok)} .err{color:var(--err)} .dim{color:var(--dim)}
+.row{display:flex;gap:8px;margin:4px 0;align-items:center}
+.row label{width:70px;flex:none}
+input{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--hi);border:1px solid var(--bd);padding:4px}
+button{font:inherit;color:var(--fg);background:var(--hi);border:1px solid var(--bd);padding:3px 10px;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+.tbl{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;min-width:100%}
+th,td{border:1px solid var(--bd);padding:3px 8px;text-align:left;white-space:nowrap}
+td button{margin-right:4px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+
+var h = React.createElement;
+
+var OK = 0;
+var ERR_INVALID = -1;
+var ERR_NOT_FOUND = -2;
+var ERR_FULL = -3;
+var MAX_NAME = 32;
+var MAX_USERS = 8;
+
+var API = "/usuarios";
+var ERR_NET = -4;
+
+function strerror(code) {
+  switch (code) {
+    case OK: return "OK";
+    case ERR_INVALID: return "EINVAL: datos invalidos";
+    case ERR_NOT_FOUND: return "ENOENT: no existe ese id";
+    case ERR_FULL: return "ENOMEM: heap lleno, haz free() a alguien";
+    case ERR_NET: return "ECONNREFUSED: corriste mvnw spring-boot:run?";
+  }
+  return "SEGFAULT (core dumped)";
+}
+
+function status_to_rc(status) {
+  if (status >= 200 && status < 300) return OK;
+  switch (status) {
+    case 400: return ERR_INVALID;
+    case 404: return ERR_NOT_FOUND;
+    case 507: return ERR_FULL;
+  }
+  return -99;
+}
+
+function http_call(method, url, body) {
+  var opts = { method: method, headers: {} };
+  if (body) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(url, opts).then(function (res) {
+    var rc = status_to_rc(res.status);
+    if (res.status == 204) return { code: rc, data: null };
+    return res.json().then(function (data) {
+      return { code: rc, data: data };
+    });
+  }).catch(function () {
+    return { code: ERR_NET, data: null };
+  });
+}
+
+function api_list()        { return http_call("GET", API, null); }
+function api_create(u)     { return http_call("POST", API, u); }
+function api_update(id, u) { return http_call("PUT", API + "/" + id, u); }
+function api_delete(id)    { return http_call("DELETE", API + "/" + id, null); }
+
+function field(label, value, on_change, type) {
+  return h("div", { className: "row" },
+    h("label", null, label),
+    h("input", {
+      type: type,
+      value: value,
+      maxLength: label == "name" ? MAX_NAME : undefined,
+      onChange: function (e) { on_change(e.target.value); }
+    })
+  );
+}
+
+function App() {
+  var s1 = React.useState([]);     var users = s1[0];    var set_users = s1[1];
+  var s2 = React.useState("");     var f_name = s2[0];   var set_name = s2[1];
+  var s3 = React.useState("");     var f_email = s3[0];  var set_email = s3[1];
+  var s4 = React.useState("");     var f_age = s4[0];    var set_age = s4[1];
+  var s5 = React.useState(0);      var edit_id = s5[0];  var set_edit_id = s5[1];
+  var s6 = React.useState(OK);     var rc = s6[0];       var set_rc = s6[1];
+  var s7 = React.useState(true);   var busy = s7[0];     var set_busy = s7[1];
+
+  function refresh() {
+    return api_list().then(function (r) {
+      if (r.code == OK) {
+        set_users(r.data);
+      } else {
+        set_rc(r.code);
+      }
+      set_busy(false);
+    });
+  }
+
+  React.useEffect(function () { refresh(); }, []);
+
+  function clear_form() {
+    set_name("");
+    set_email("");
+    set_age("");
+    set_edit_id(0);
+  }
+
+  function finish(r) {
+    set_rc(r.code);
+    if (r.code == OK) {
+      clear_form();
+      return refresh();
+    }
+    set_busy(false);
+  }
+
+  function on_submit() {
+    if (busy) return;
+    var u = { name: f_name, email: f_email, age: parseInt(f_age, 10) };
+    set_busy(true);
+    if (edit_id == 0) {
+      api_create(u).then(finish);
+    } else {
+      api_update(edit_id, u).then(finish);
+    }
+  }
+
+  function on_edit(u) {
+    set_name(u.name);
+    set_email(u.email);
+    set_age(String(u.age));
+    set_edit_id(u.id);
+  }
+
+  function on_delete(id) {
+    if (busy) return;
+    set_busy(true);
+    api_delete(id).then(function (r) {
+      set_rc(r.code);
+      if (edit_id == id) clear_form();
+      return refresh();
+    });
+  }
+
+  function make_row(u) {
+    return h("tr", { key: u.id },
+      h("td", null, u.id),
+      h("td", null, u.name),
+      h("td", null, u.email),
+      h("td", null, u.age),
+      h("td", null,
+        h("button", { disabled: busy, onClick: function () { on_edit(u); } }, "editar"),
+        h("button", { disabled: busy, onClick: function () { on_delete(u.id); } }, "borrar")
+      )
+    );
+  }
+
+  var rows = [];
+  var i;
+  for (i = 0; i < users.length; i++) {
+    rows[i] = make_row(users[i]);
+  }
+
+  return h("div", null,
+    h("h1", null, "USERS"),
+    h("pre", { className: "dim" }, "struct usuario { int id; char name[" + MAX_NAME + "]; char email[64]; int age; };"),
+
+    h("h2", null, edit_id == 0 ? "/* CREATE */" : "/* UPDATE id=" + edit_id + " */"),
+    h("form", { onSubmit: function (e) { e.preventDefault(); on_submit(); } },
+      field("name", f_name, set_name, "text"),
+      field("email", f_email, set_email, "text"),
+      field("age", f_age, set_age, "text"),
+      h("div", { className: "row" },
+        h("button", { type: "submit", disabled: busy }, edit_id == 0 ? "crear" : "guardar"),
+        edit_id != 0 ? h("button", { type: "button", onClick: clear_form }, "cancelar") : null
+      )
+    ),
+
+    h("pre", { className: rc == OK ? "ok" : "err" }, "errno = " + rc + "  (" + strerror(rc) + ")"),
+    h("pre", { className: "dim" }, busy ? "esperando al servidor..." : "listo."),
+
+    h("h2", null, "/* READ */  heap: " + users.length + "/" + MAX_USERS),
+    h("div", { className: "tbl" },
+      h("table", null,
+        h("thead", null,
+          h("tr", null,
+            h("th", null, "id"), h("th", null, "name"), h("th", null, "email"),
+            h("th", null, "age"), h("th", null, "ops")
+          )
+        ),
+        h("tbody", null, rows)
+      )
+    ),
+
+    h("pre", { className: "dim" }, "\n/* TODO: free(db) al cerrar la pestana */\nreturn 0;")
+  );
+}
+
+function main() {
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(h(App));
+  return 0;
+}
+
+main();
+</script>
+</body>
+</html>
